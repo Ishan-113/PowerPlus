@@ -1,0 +1,180 @@
+"""
+PowerPlus-style Energy Monitoring API
+Endpoints map directly to the four screens of the reference app:
+  /api/live         -> Data Monitor
+  /api/history       -> Trends
+  /api/report         -> Report (15min / daily / monthly)
+  /api/consumption -> Consumption
+"""
+from datetime import date, datetime
+from itertools import groupby
+from typing import List, Optional
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from database import get_cursor
+import nl_query
+
+app = FastAPI(title="PowerPlus API", version="0.1.0")
+
+# Allow the React frontend (any origin during development) to call this API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------------------------------------------------
+# Data Monitor  ->  live values grouped by equipment_group
+# ---------------------------------------------------------
+@app.get("/api/live")
+def get_live_values(group: Optional[str] = None):
+    query = """
+        SELECT tm.tag_id, tm.tag_name, tm.equipment_group, tm.unit,
+               lv.value, lv.last_updated
+        FROM tag_master tm
+        LEFT JOIN live_values lv ON lv.tag_id = tm.tag_id
+        WHERE tm.is_active = TRUE
+    """
+    params = []
+    if group:
+        query += " AND tm.equipment_group = %s"
+        params.append(group)
+    query += " ORDER BY tm.equipment_group, tm.display_order"
+
+    with get_cursor() as cur:
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+    # group rows by equipment_group, same shape as the app's yellow section headers
+    grouped = []
+    for group_name, items in groupby(rows, key=lambda r: r["equipment_group"]):
+        grouped.append({"group": group_name, "tags": list(items)})
+    return grouped
+
+
+# ---------------------------------------------------------
+# Trends  ->  time-series history for selected tags
+# ---------------------------------------------------------
+@app.get("/api/history")
+def get_history(
+    tag_ids: str = Query(..., description="Comma-separated tag_id list, e.g. 1,4,9"),
+    start: datetime = Query(..., description="ISO datetime, e.g. 2026-06-25T11:15:00"),
+    end: datetime = Query(..., description="ISO datetime, e.g. 2026-06-25T12:05:00"),
+):
+    try:
+        ids = [int(x) for x in tag_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(400, "tag_ids must be a comma-separated list of integers")
+    if not ids:
+        raise HTTPException(400, "At least one tag_id is required")
+
+    placeholders = ",".join(["%s"] * len(ids))
+    query = f"""
+        SELECT th.tag_id, tm.tag_name, th.ts, th.value
+        FROM tag_history th
+        JOIN tag_master tm ON tm.tag_id = th.tag_id
+        WHERE th.tag_id IN ({placeholders}) AND th.ts BETWEEN %s AND %s
+        ORDER BY th.tag_id, th.ts
+    """
+    with get_cursor() as cur:
+        cur.execute(query, ids + [start, end])
+        rows = cur.fetchall()
+
+    series = []
+    for tag_id, items in groupby(rows, key=lambda r: r["tag_id"]):
+        items = list(items)
+        series.append({
+            "tag_id": tag_id,
+            "tag_name": items[0]["tag_name"],
+            "points": [{"ts": r["ts"], "value": r["value"]} for r in items],
+        })
+    return series
+
+
+# ---------------------------------------------------------
+# Report  ->  15-minute / daily / monthly, with date range
+# ---------------------------------------------------------
+@app.get("/api/report")
+def get_report(
+    granularity: str = Query(..., regex="^(15min|daily|monthly)$"),
+    start: str = Query(..., description="Date or datetime depending on granularity"),
+    end: str = Query(..., description="Date or datetime depending on granularity"),
+    tag_ids: Optional[str] = Query(None, description="Comma-separated tag_id list; omit for all"),
+):
+    ids = [int(x) for x in tag_ids.split(",")] if tag_ids else None
+
+    if granularity == "15min":
+        table, ts_col = "tag_history", "ts"
+    elif granularity == "daily":
+        table, ts_col = "tag_rollup_daily", "rollup_date"
+    else:
+        table, ts_col = "tag_rollup_monthly", "rollup_month"
+
+    query = f"""
+        SELECT t.tag_id, tm.tag_name, tm.unit, t.{ts_col} AS period, t.value
+        FROM {table} t
+        JOIN tag_master tm ON tm.tag_id = t.tag_id
+        WHERE t.{ts_col} BETWEEN %s AND %s
+    """
+    params = [start, end]
+    if ids:
+        query += f" AND t.tag_id IN ({','.join(['%s'] * len(ids))})"
+        params += ids
+    query += f" ORDER BY t.tag_id, t.{ts_col}"
+
+    with get_cursor() as cur:
+        cur.execute(query, params)
+        return cur.fetchall()
+
+
+# ---------------------------------------------------------
+# Consumption  ->  daily rollup for cumulative-type tags
+# ---------------------------------------------------------
+@app.get("/api/consumption")
+def get_consumption(on_date: date = Query(..., alias="date")):
+    query = """
+        SELECT tm.tag_id, tm.tag_name, tm.equipment_group, tm.unit, trd.value
+        FROM tag_rollup_daily trd
+        JOIN tag_master tm ON tm.tag_id = trd.tag_id
+        WHERE trd.rollup_date = %s AND tm.tag_type = 'cumulative'
+        ORDER BY tm.display_order
+    """
+    with get_cursor() as cur:
+        cur.execute(query, [on_date])
+        return cur.fetchall()
+
+
+@app.get("/api/tags")
+def list_tags():
+    """Tag master list — used by the frontend to build the Trends checklist."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT tag_id, tag_name, equipment_group, unit, tag_type "
+            "FROM tag_master WHERE is_active = TRUE ORDER BY equipment_group, display_order"
+        )
+        return cur.fetchall()
+
+
+class AskRequest(BaseModel):
+    question: str
+
+
+@app.post("/api/ask")
+def ask_question(req: AskRequest):
+    """Phase 2 — natural language question -> SQL -> results -> plain-English answer."""
+    if not req.question or not req.question.strip():
+        raise HTTPException(400, "question must not be empty")
+    try:
+        return nl_query.ask(req.question.strip())
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
