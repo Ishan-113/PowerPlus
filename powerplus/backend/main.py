@@ -101,7 +101,7 @@ def get_history(
 # ---------------------------------------------------------
 @app.get("/api/report")
 def get_report(
-    granularity: str = Query(..., regex="^(15min|daily|monthly)$"),
+    granularity: str = Query(..., pattern="^(15min|hourly|daily|monthly)$"),
     start: str = Query(..., description="Date or datetime depending on granularity"),
     end: str = Query(..., description="Date or datetime depending on granularity"),
     tag_ids: Optional[str] = Query(None, description="Comma-separated tag_id list; omit for all"),
@@ -109,23 +109,62 @@ def get_report(
     ids = [int(x) for x in tag_ids.split(",")] if tag_ids else None
 
     if granularity == "15min":
-        table, ts_col = "tag_history", "ts"
+        # raw 15-min history
+        query = """
+            SELECT t.tag_id, tm.tag_name, tm.unit, t.ts AS period, t.value
+            FROM tag_history t
+            JOIN tag_master tm ON tm.tag_id = t.tag_id
+            WHERE t.ts BETWEEN %s AND %s
+        """
+        params = [start, end]
+        if ids:
+            query += f" AND t.tag_id IN ({','.join(['%s']*len(ids))})"
+            params += ids
+        query += " ORDER BY t.tag_id, t.ts"
+
+    elif granularity == "hourly":
+        # aggregate tag_history into 1-hour buckets
+        query = """
+            SELECT t.tag_id, tm.tag_name, tm.unit,
+                   DATE_FORMAT(DATE_SUB(t.ts, INTERVAL MINUTE(t.ts) MINUTE), '%Y-%m-%d %H:00:00') AS period,
+                   SUM(t.value) AS value
+            FROM tag_history t
+            JOIN tag_master tm ON tm.tag_id = t.tag_id
+            WHERE t.ts BETWEEN %s AND %s
+        """
+        params = [start, end]
+        if ids:
+            query += f" AND t.tag_id IN ({','.join(['%s']*len(ids))})"
+            params += ids
+        query += " GROUP BY t.tag_id, tm.tag_name, tm.unit, period ORDER BY t.tag_id, period"
+
     elif granularity == "daily":
         table, ts_col = "tag_rollup_daily", "rollup_date"
-    else:
-        table, ts_col = "tag_rollup_monthly", "rollup_month"
+        query = f"""
+            SELECT t.tag_id, tm.tag_name, tm.unit, t.{ts_col} AS period, t.value
+            FROM {table} t
+            JOIN tag_master tm ON tm.tag_id = t.tag_id
+            WHERE t.{ts_col} BETWEEN %s AND %s
+        """
+        params = [start, end]
+        if ids:
+            query += f" AND t.tag_id IN ({','.join(['%s']*len(ids))})"
+            params += ids
+        query += f" ORDER BY t.tag_id, t.{ts_col}"
 
-    query = f"""
-        SELECT t.tag_id, tm.tag_name, tm.unit, t.{ts_col} AS period, t.value
-        FROM {table} t
-        JOIN tag_master tm ON tm.tag_id = t.tag_id
-        WHERE t.{ts_col} BETWEEN %s AND %s
-    """
-    params = [start, end]
-    if ids:
-        query += f" AND t.tag_id IN ({','.join(['%s'] * len(ids))})"
-        params += ids
-    query += f" ORDER BY t.tag_id, t.{ts_col}"
+    else:  # monthly
+        table, ts_col = "tag_rollup_monthly", "rollup_month"
+        query = f"""
+            SELECT t.tag_id, tm.tag_name, tm.unit, t.{ts_col} AS period, t.value
+            FROM {table} t
+            JOIN tag_master tm ON tm.tag_id = t.tag_id
+            WHERE t.{ts_col} BETWEEN %s AND %s
+        """
+        params = [start, end]
+        if ids:
+            query += f" AND t.tag_id IN ({','.join(['%s']*len(ids))})"
+            params += ids
+        query += f" ORDER BY t.tag_id, t.{ts_col}"
 
     with get_cursor() as cur:
         cur.execute(query, params)

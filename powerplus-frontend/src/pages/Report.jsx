@@ -4,6 +4,7 @@ import { api } from '../api.js'
 
 const TABS = [
   { key: '15min', label: '15 Minutes' },
+  { key: 'hourly', label: 'Hourly' },
   { key: 'daily', label: 'Daily' },
   { key: 'monthly', label: 'Monthly' },
 ]
@@ -12,6 +13,7 @@ function defaultRange(granularity) {
   const end = new Date()
   const start = new Date()
   if (granularity === '15min') start.setHours(start.getHours() - 6)
+  else if (granularity === 'hourly') start.setDate(start.getDate() - 1)
   else if (granularity === 'daily') start.setDate(start.getDate() - 7)
   else start.setMonth(start.getMonth() - 6)
   const fmt = (d) => d.toISOString().slice(0, granularity === 'monthly' || granularity === 'daily' ? 10 : 19).replace('T', ' ')

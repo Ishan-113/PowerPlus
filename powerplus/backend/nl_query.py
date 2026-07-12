@@ -67,13 +67,36 @@ def build_schema_context(cur):
 SQL_SYSTEM_PROMPT = """You are a SQL generator for a MySQL 8 industrial energy-monitoring database.
 Given a question in plain English, output EXACTLY ONE valid MySQL SELECT statement that answers it.
 
+TODAY'S DATE: {today}. CURRENT YEAR: {year}.
+Always use this year when the user says things like "10th July", "5th July", "yesterday", "today" etc.
+
 Rules:
-- Output ONLY the raw SQL. No markdown fences, no explanation, no semicolon-separated multiple statements.
+- Output ONLY the raw SQL. No markdown fences, no explanation, no semicolons at the end.
 - Only ever write SELECT statements. Never write INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/GRANT.
-- Always resolve tag names via a JOIN to tag_master (match tag_name exactly as given in the tag list below).
-- For "today", "yesterday", "this month" etc, use MySQL date functions (CURDATE(), DATE_SUB, etc) rather than hardcoding dates unless the user gives an explicit date.
-- For questions about totals/consumption per day, prefer tag_rollup_daily. For sub-day trends, use tag_history. For "right now"/"current", use live_values.
-- If the question is ambiguous or can't be answered with this schema, output: SELECT 'UNSUPPORTED' AS error;
+- Always resolve tag names via a JOIN to tag_master on tag_name.
+- For "today", "yesterday", "this month" use MySQL date functions (CURDATE(), DATE_SUB etc).
+- For partial tag name mentions like "SAF-2", "Grid Import", "SMS-4 Fur-1" — match using LIKE against tag_name in tag_master (e.g. tag_name LIKE '%SAF-2%' or tag_name LIKE '%Grid Import kWh%').
+- For questions about totals/consumption per day → prefer tag_rollup_daily.
+- For sub-day trends (15-min or hourly level) → use tag_history.
+- For "right now" / "current" / "live" → use live_values.
+- If the question truly cannot be answered with this schema, output: SELECT 'UNSUPPORTED' AS error
+
+FEW-SHOT EXAMPLES:
+
+Q: What was grid import on 10th July?
+A: SELECT trd.value FROM tag_rollup_daily trd JOIN tag_master tm ON trd.tag_id = tm.tag_id WHERE tm.tag_name = 'Grid Import kWh' AND trd.rollup_date = '2026-07-10'
+
+Q: What is SAF-2 total for 5th July?
+A: SELECT trd.value FROM tag_rollup_daily trd JOIN tag_master tm ON trd.tag_id = tm.tag_id WHERE tm.tag_name LIKE '%SAF-2%kWh%' AND trd.rollup_date = '2026-07-05'
+
+Q: Show SMS-4 furnace consumption between 10th and 11th July
+A: SELECT tm.tag_name, SUM(trd.value) AS total FROM tag_rollup_daily trd JOIN tag_master tm ON trd.tag_id = tm.tag_id WHERE tm.tag_name LIKE 'SMS-4 Fur-%kWh%' AND trd.rollup_date BETWEEN '2026-07-10' AND '2026-07-11' GROUP BY tm.tag_name
+
+Q: What is SAF-2 consuming right now?
+A: SELECT tm.tag_name, lv.value, lv.last_updated FROM live_values lv JOIN tag_master tm ON lv.tag_id = tm.tag_id WHERE tm.tag_name LIKE '%SAF-2%kW%'
+
+Q: Total SMS-2 furnace consumption today
+A: SELECT tm.tag_name, trd.value FROM tag_rollup_daily trd JOIN tag_master tm ON trd.tag_id = tm.tag_id WHERE tm.tag_name LIKE 'SMS-2 Fur-%kWh%' AND trd.rollup_date = CURDATE()
 
 SCHEMA:
 {schema}
@@ -114,14 +137,19 @@ def enforce_limit(sql: str, max_rows: int = 500) -> str:
 
 
 def generate_sql(question: str, schema_context: str) -> str:
+    from datetime import date
+    today = date.today()
     client = get_client()
-    prompt = SQL_SYSTEM_PROMPT.format(schema=schema_context)
+    prompt = SQL_SYSTEM_PROMPT.format(
+        schema=schema_context,
+        today=today.strftime("%Y-%m-%d"),
+        year=today.year,
+    )
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=f"{prompt}\n\nQUESTION: {question}\n\nSQL:",
     )
     sql = response.text.strip()
-    # strip markdown fences if the model adds them anyway
     sql = re.sub(r"^```(?:sql)?\s*|\s*```$", "", sql, flags=re.IGNORECASE | re.MULTILINE).strip()
     return sql
 
