@@ -19,10 +19,11 @@ import nl_query
 
 app = FastAPI(title="PowerPlus API", version="0.1.0")
 
-# Allow the React frontend (any origin during development) to call this API
+# Allow the React frontend from any origin during development and production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
