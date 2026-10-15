@@ -16,5 +16,9 @@ services:
         sync: false
       - key: DB_NAME
         sync: false
+      - key: DB_SSL
+        value: "true"
+      - key: DB_SSL_VERIFY
+        value: "false"
       - key: GEMINI_API_KEY
         sync: false

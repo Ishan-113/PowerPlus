@@ -14,8 +14,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import logging
+import database as db_module
 from database import get_cursor
 import nl_query
+
+logger = logging.getLogger("powerplus")
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="PowerPlus API", version="0.1.0")
 
@@ -218,3 +223,24 @@ def ask_question(req: AskRequest):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health/db")
+def health_db():
+    """DB connectivity check — returns driver error without leaking credentials."""
+    try:
+        with get_cursor() as cur:
+            cur.execute("SELECT 1 AS ok")
+            row = cur.fetchone()
+        return {
+            "status": "ok",
+            "db_host": db_module.DB_HOST,
+            "db_port": db_module.DB_PORT,
+            "db_name": db_module.DB_NAME,
+            "db_user": db_module.DB_USER,
+            "db_ssl": db_module.DB_SSL,
+            "result": row,
+        }
+    except Exception as e:
+        logger.exception("DB health check failed")
+        raise HTTPException(500, f"DB connection failed: {type(e).__name__}: {e}")
