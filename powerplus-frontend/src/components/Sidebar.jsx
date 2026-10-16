@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { isPackagedApp } from '../lib/isPackaged.js'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: DashboardIcon, end: true },
@@ -9,19 +7,10 @@ const NAV_ITEMS = [
   { to: '/report', label: 'Report', icon: ReportIcon },
   { to: '/consumption', label: 'Consumption', icon: ConsumptionIcon },
   { to: '/ask', label: 'Ask', icon: AskIcon },
-  { to: '/download', label: 'Get the App', icon: DownloadIcon, browserOnly: true },
 ]
 
 export default function Sidebar() {
-  const [packaged, setPackaged] = useState(() => isPackagedApp())
-  useEffect(() => {
-    const mq = window.matchMedia?.('(display-mode: standalone)')
-    if (!mq?.addEventListener) return
-    const onChange = () => setPackaged(isPackagedApp())
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  const items = NAV_ITEMS.filter(item => !(item.browserOnly && packaged))
+  const items = NAV_ITEMS
   return (
     <aside style={styles.sidebar}>
       <div style={styles.brand}>
@@ -73,9 +62,6 @@ function ConsumptionIcon() {
 }
 function AskIcon() {
   return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="12" cy="17" r="0.9" fill="currentColor"/></svg>)
-}
-function DownloadIcon() {
-  return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>)
 }
 
 const styles = {
