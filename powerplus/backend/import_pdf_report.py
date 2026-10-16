@@ -84,12 +84,20 @@ def main():
             date_str, time_str = row[0], row[1]
             ts, is_daily = parse_timestamp(date_str, time_str)
 
-            for col_idx in range(2, len(header)):
-                col_name = header[col_idx]
-                value = row[col_idx] if col_idx < len(row) else None
-                if col_name is None or value is None:
-                    continue
+            # Align by position ignoring wrapped/empty cells: continuation pages
+            # (no header row) can be one cell shorter than the header when a
+            # wrapped header cell collapses. Pairwise zip would silently shift
+            # every value into the wrong tag, so require equal counts instead.
+            value_headers = [h for h in header[2:] if h is not None]
+            value_cells = [c for c in list(row[2:]) if c is not None]
+            if len(value_cells) != len(value_headers):
+                unmatched.add(
+                    f"column-count mismatch {date_str} {time_str} "
+                    f"({len(value_cells)} cells vs {len(value_headers)} tags) — row skipped"
+                )
+                continue
 
+            for col_name, value in zip(value_headers, value_cells):
                 key = normalize(col_name)
                 if key not in tag_lookup:
                     unmatched.add(col_name.replace("\n", " "))
