@@ -132,7 +132,7 @@ def get_report(
         # aggregate tag_history into 1-hour buckets
         query = """
             SELECT t.tag_id, tm.tag_name, tm.unit,
-                   DATE_FORMAT(DATE_SUB(t.ts, INTERVAL MINUTE(t.ts) MINUTE), '%Y-%m-%d %H:00:00') AS period,
+                    DATE_FORMAT(DATE_SUB(t.ts, INTERVAL MINUTE(t.ts) MINUTE), '%%Y-%%m-%%d %%H:00:00') AS period,
                    SUM(t.value) AS value
             FROM tag_history t
             JOIN tag_master tm ON tm.tag_id = t.tag_id
