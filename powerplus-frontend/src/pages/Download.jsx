@@ -14,15 +14,15 @@ const BUILDS = [
     ],
   },
   {
-    platform: 'Windows',
-    file: '/app.msix',
-    filename: 'PowerPlus.msix',
-    version: '1.0.0',
-    size: '~333 KB',
+    platform: 'Windows (PC / laptop)',
+    file: null,
+    filename: null,
+    version: 'PWA',
+    size: 'no download',
     steps: [
-      'Download on your PC and double-click the file.',
-      'If Windows warns about an untrusted publisher, install the test certificate once (right-click install.ps1 → Run with PowerShell).',
-      'Find PowerPlus in the Start menu.',
+      'Open this site in Edge or Chrome on your PC.',
+      'Click the install icon in the address bar (Edge: ⋯ → Apps → Install PowerPlus).',
+      'Find PowerPlus in the Start menu. Updates arrive automatically.',
     ],
   },
 ]
@@ -39,9 +39,11 @@ export default function Download() {
                 <div style={styles.platform}>{b.platform}</div>
                 <div style={styles.meta}>v{b.version} · {b.size} · {b.filename}</div>
               </div>
-              <a href={b.file} download={b.filename} style={styles.button}>
-                Download
-              </a>
+              {b.file && (
+                <a href={b.file} download={b.filename} style={styles.button}>
+                  Download
+                </a>
+              )}
             </div>
             <ol style={styles.steps}>
               {b.steps.map((s, i) => <li key={i}>{s}</li>)}
