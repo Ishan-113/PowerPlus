@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.power_plus_sandy.twa",
+      "sha256_cert_fingerprints": ["57:B9:72:46:DD:41:9E:F7:74:B8:B6:A3:90:A1:C1:2D:93:EC:90:3A:AE:53:AF:BF:14:9E:A7:D6:0B:A1:5F:C4"]
+    }
+  }
+]
