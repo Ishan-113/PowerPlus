@@ -13,7 +13,9 @@ This script rebuilds the whole report window from the PDF itself:
   - deletes tag_history rows for tags 116-123 in [2026-10-14 21:00, 2026-10-16)
   - re-inserts all 21 report rows x 8 values (168 history rows)
   - rebuilds the 2026-10-14/15 daily rollups from history (source='real')
-  - refreshes live_values for these tags from the newest history row
+  - ADDS the imported sums onto the existing live_values, so the dashboard
+    shows "previous value + new import" on the cards instead of the newest
+    (often 0) reading. Re-runs with the PDF data already present add nothing.
 
 Usage:
     python reconcile_oct1415_pdf.py "C:\path\to\DATASET PP.pdf"
@@ -142,6 +144,12 @@ def main():
         for r in cur.fetchall():
             print(f"  tag {r['tag_id']} {r['d']} = {r['total']}")
 
+        cur.execute(
+            f"SELECT COUNT(*) AS n FROM tag_history WHERE tag_id IN ({placeholders}) AND ts >= %s AND ts < %s",
+            list(TAG_IDS) + [FROM_TS, UNTIL_TS],
+        )
+        before_rows = cur.fetchone()["n"]
+
         deleted = cur.execute(
             f"DELETE FROM tag_history WHERE tag_id IN ({placeholders}) AND ts >= %s AND ts < %s",
             list(TAG_IDS) + [FROM_TS, UNTIL_TS],
@@ -170,17 +178,33 @@ def main():
         )
         print("rebuilt daily rollups from history")
 
+        # Dashboard card value = previous live value + everything this import
+        # adds (the same per-tag sums the PDF's own Total row shows). Guard
+        # against double-counting: only accumulate if the PDF rows weren't
+        # already in the DB (run remove_oct1415_pdf_data.py to re-import).
         cur.execute(
-            f"""INSERT INTO live_values (tag_id, value, last_updated)
-                SELECT h.tag_id, h.value, h.ts
-                FROM tag_history h
-                JOIN (SELECT tag_id, MAX(ts) AS mx FROM tag_history
-                      WHERE tag_id IN ({placeholders}) GROUP BY tag_id) m
-                  ON h.tag_id = m.tag_id AND h.ts = m.mx
-                ON DUPLICATE KEY UPDATE value = VALUES(value), last_updated = VALUES(last_updated)""",
+            f"SELECT tag_id, value FROM live_values WHERE tag_id IN ({placeholders})",
             list(TAG_IDS),
         )
-        print("refreshed live_values from newest history rows")
+        old_live = {r["tag_id"]: r["value"] for r in cur.fetchall()}
+
+        if before_rows == 0:
+            newest_ts = max(ts for _tag, ts, _val in history_rows)
+            updates = [
+                (tag_id, float(old_live.get(tag_id) or 0) + sums[tag_id], newest_ts)
+                for tag_id in TAG_IDS
+            ]
+            cur.executemany(
+                """INSERT INTO live_values (tag_id, value, last_updated) VALUES (%s, %s, %s)
+                   ON DUPLICATE KEY UPDATE value = VALUES(value), last_updated = VALUES(last_updated)""",
+                updates,
+            )
+            print("live_values accumulated: previous value + new imported values")
+        else:
+            print(
+                f"live_values left unchanged ({before_rows} PDF rows were already "
+                "present — run remove_oct1415_pdf_data.py first to re-import cleanly)"
+            )
 
         cur.execute(
             f"""SELECT tag_id, rollup_date, value FROM tag_rollup_daily
