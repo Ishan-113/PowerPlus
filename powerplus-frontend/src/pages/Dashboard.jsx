@@ -55,18 +55,10 @@ function fmtDay(d) {
   return parsed ? parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : null
 }
 
-function fmtDayFull(d) {
-  const parsed = parseTs(d)
-  return parsed
-    ? parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-    : String(d ?? '')
-}
-
 export default function Dashboard() {
   const navigate = useNavigate()
   const [groups, setGroups] = useState(null)
   const [highlights, setHighlights] = useState([])
-  const [dailyByTag, setDailyByTag] = useState({})
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -83,24 +75,9 @@ export default function Dashboard() {
           })
           .filter(Boolean)
 
-        let daily = {}
-        const ids = highlightTags.map(t => t.tag_id)
-        if (ids.length) {
-          try {
-            const rows = await api.getReport('daily', '2000-01-01', '2099-12-31', ids)
-            for (const r of rows) (daily[r.tag_id] ||= []).push(r)
-            for (const key of Object.keys(daily)) {
-              daily[key].sort((a, b) => String(b.period).localeCompare(String(a.period)))
-            }
-          } catch {
-            daily = {}
-          }
-        }
-
         if (!cancelled) {
           setGroups(data)
           setHighlights(highlightTags)
-          setDailyByTag(daily)
           setError(null)
         }
       } catch (e) {
@@ -138,12 +115,12 @@ export default function Dashboard() {
             <div style={styles.sectionHead}>
               <span style={styles.sectionLabel}>Key meters</span>
               <span style={styles.sectionMeta}>
-                live value + every daily total stored in the database
+                live value + latest daily total
               </span>
             </div>
             <div style={styles.highlightGrid}>
               {highlights.map(tag => (
-                <HighlightCard key={tag.tag_id} tag={tag} daily={dailyByTag[tag.tag_id] || []} />
+                <HighlightCard key={tag.tag_id} tag={tag} />
               ))}
             </div>
           </section>
@@ -206,9 +183,11 @@ function SummaryItem({ tag }) {
   )
 }
 
-function HighlightCard({ tag, daily }) {
+function HighlightCard({ tag }) {
   const hasValue = tag.value !== null && tag.value !== undefined
+  const hasDay = tag.day_value !== null && tag.day_value !== undefined
   const updated = timeAgo(tag.last_updated)
+  const dayLabel = hasDay ? fmtDay(tag.day_date) : null
   return (
     <div style={styles.highlightCard}>
       <span style={styles.highlightLabel}>{tag.label}</span>
@@ -221,22 +200,12 @@ function HighlightCard({ tag, daily }) {
           {updated}
         </span>
       )}
-      <div style={styles.dailyList}>
-        {daily.length ? daily.map(r => (
-          <div key={r.period} style={styles.dailyRow}>
-            <span style={styles.dailyDate}>{fmtDayFull(r.period)}</span>
-            <span
-              className="num"
-              style={{ ...styles.dailyValue, ...(r.source === 'simulated' ? styles.dailyValueSim : {}) }}
-            >
-              {Number(r.value).toLocaleString('en-IN')}
-              {r.source === 'simulated' && <small> sim</small>}
-            </span>
-          </div>
-        )) : (
-          <span style={styles.dailyEmpty}>No stored daily totals</span>
-        )}
-      </div>
+      {hasDay && (
+        <span style={styles.summaryDay}>
+          <span style={styles.summaryDayLabel}>{dayLabel ? `${dayLabel} total` : 'day total'}</span>
+          <span className="num">{Number(tag.day_value).toLocaleString('en-IN')} {tag.unit}</span>
+        </span>
+      )}
     </div>
   )
 }
@@ -292,37 +261,6 @@ const styles = {
     fontSize: 24,
     fontWeight: 600,
     color: 'var(--text-primary)',
-  },
-  dailyList: {
-    marginTop: 8,
-    borderTop: '1px solid var(--border-soft)',
-    paddingTop: 8,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 3,
-    maxHeight: 168,
-    overflowY: 'auto',
-  },
-  dailyRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: 8,
-    fontSize: 11,
-  },
-  dailyDate: {
-    color: 'var(--text-muted)',
-    whiteSpace: 'nowrap',
-  },
-  dailyValue: {
-    color: 'var(--text-secondary)',
-  },
-  dailyValueSim: {
-    color: 'var(--text-muted)',
-    fontStyle: 'italic',
-  },
-  dailyEmpty: {
-    fontSize: 11,
-    color: 'var(--text-muted)',
   },
   summaryItem: {
     background: 'var(--bg-panel)',
