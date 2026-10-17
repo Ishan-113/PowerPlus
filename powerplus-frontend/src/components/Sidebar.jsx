@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { api } from '../api.js'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: DashboardIcon, end: true },
@@ -11,6 +13,21 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const items = NAV_ITEMS
+  const [dbOk, setDbOk] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const check = () => {
+      api.getHealth().then(
+        () => { if (!cancelled) setDbOk(true) },
+        () => { if (!cancelled) setDbOk(false) },
+      )
+    }
+    check()
+    const id = setInterval(check, 60000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
   return (
     <aside style={styles.sidebar}>
       <div style={styles.brand}>
@@ -37,8 +54,8 @@ export default function Sidebar() {
 
       <div style={styles.footer}>
         <div style={styles.statusRow}>
-          <span style={styles.dot} />
-          <span>SQL layer connected</span>
+          <span style={{ ...styles.dot, ...(dbOk === false ? styles.dotDown : dbOk === null ? styles.dotChecking : {}) }} />
+          <span>{dbOk === false ? 'SQL layer unreachable' : dbOk === null ? 'Checking SQL layer…' : 'SQL layer connected'}</span>
         </div>
       </div>
     </aside>
@@ -133,5 +150,13 @@ const styles = {
     borderRadius: '50%',
     background: 'var(--accent-cyan)',
     boxShadow: '0 0 0 3px var(--accent-cyan-dim)',
+  },
+  dotDown: {
+    background: 'var(--accent-red)',
+    boxShadow: '0 0 0 3px var(--accent-red-dim)',
+  },
+  dotChecking: {
+    background: 'var(--text-muted)',
+    boxShadow: 'none',
   },
 }

@@ -9,6 +9,13 @@ const TABS = [
   { key: 'monthly', label: 'Monthly' },
 ]
 
+function pad(n) { return String(n).padStart(2, '0') }
+
+function fmtLocal(d, withTime) {
+  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return withTime ? `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` : date
+}
+
 function defaultRange(granularity) {
   const end = new Date()
   const start = new Date()
@@ -16,8 +23,8 @@ function defaultRange(granularity) {
   else if (granularity === 'hourly') start.setDate(start.getDate() - 1)
   else if (granularity === 'daily') start.setDate(start.getDate() - 7)
   else start.setMonth(start.getMonth() - 6)
-  const fmt = (d) => d.toISOString().slice(0, granularity === 'monthly' || granularity === 'daily' ? 10 : 19).replace('T', ' ')
-  return { start: fmt(start), end: fmt(end) }
+  const withTime = granularity === '15min' || granularity === 'hourly'
+  return { start: fmtLocal(start, withTime), end: fmtLocal(end, withTime) }
 }
 
 export default function Report() {

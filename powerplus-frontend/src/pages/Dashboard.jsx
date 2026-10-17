@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import TopBar from '../components/TopBar.jsx'
 import { api } from '../api.js'
@@ -8,34 +8,103 @@ const TILES = [
   { to: '/trends', label: 'Trends', desc: 'Plot tags over time', accent: 'var(--accent-amber)' },
   { to: '/report', label: 'Report', desc: '15-min, daily & monthly exports', accent: 'var(--accent-blue)' },
   { to: '/consumption', label: 'Consumption', desc: 'Daily energy ledger', accent: 'var(--accent-red)' },
+  { to: '/ask', label: 'Ask', desc: 'Plain-English questions', accent: 'var(--accent-cyan)' },
 ]
+
+const REFRESH_MS = 30000
+const STALE_MS = 24 * 60 * 60 * 1000
+
+function parseTs(ts) {
+  if (!ts) return null
+  const d = new Date(String(ts).replace(' ', 'T'))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function timeAgo(ts) {
+  const d = parseTs(ts)
+  if (!d) return null
+  const mins = Math.round((Date.now() - d.getTime()) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 48) return `${hours} hr${hours === 1 ? '' : 's'} ago`
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+}
+
+function isStale(ts) {
+  const d = parseTs(ts)
+  return d ? Date.now() - d.getTime() > STALE_MS : false
+}
+
+function displayLabel(tag) {
+  const suffix = ` ${tag.unit}`
+  return tag.tag_name.toLowerCase().endsWith(suffix.toLowerCase())
+    ? tag.tag_name.slice(0, -suffix.length)
+    : tag.tag_name
+}
+
+function fmtDay(d) {
+  const parsed = parseTs(d)
+  return parsed ? parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : null
+}
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const [summary, setSummary] = useState(null)
+  const [groups, setGroups] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    api.getLive().then(groups => {
-      const cumulative = groups.find(g => g.group === 'Cumulative (24 Hours)')
-      setSummary(cumulative)
-    }).catch(e => setError(e.message))
+    let cancelled = false
+
+    async function load() {
+      try {
+        const data = await api.getLive()
+        if (!cancelled) { setGroups(data); setError(null) }
+      } catch (e) {
+        if (!cancelled) setError(e.message)
+      }
+    }
+
+    load()
+    const id = setInterval(load, REFRESH_MS)
+    return () => { cancelled = true; clearInterval(id) }
   }, [])
 
-  const find = (name) => summary?.tags.find(t => t.tag_name === name)?.value
+  const summary = useMemo(() => {
+    if (!groups) return null
+    return groups.find(g => g.group === 'Cumulative (24 Hours)')
+      || groups.find(g => /cumulative/i.test(g.group))
+      || null
+  }, [groups])
 
   return (
     <>
       <TopBar title="Dashboard" subtitle="PowerPlus Energy Monitoring" />
       <div style={{ padding: 28 }}>
 
-        <div style={styles.summaryStrip}>
-          <SummaryItem label="Grid Import" value={find('Grid Import kWh')} unit="kWh" color="var(--accent-red)" />
-          <SummaryItem label="Grid Export" value={find('Grid Export kWh')} unit="kWh" color="var(--accent-cyan)" />
-          <SummaryItem label="TG-2 Generation" value={find('30MW TG-2 kWh')} unit="kWh" color="var(--accent-amber)" />
-          <SummaryItem label="TG-3 Generation" value={find('33MW TG-3 kWh')} unit="kWh" color="var(--accent-amber)" />
-        </div>
-        {error && <p style={{ color: 'var(--accent-red)', fontSize: 13 }}>Could not reach API: {error}</p>}
+        {error && <p style={styles.error}>Could not reach API: {error}</p>}
+        {!groups && !error && <p style={styles.muted}>Loading live values…</p>}
+        {groups && !summary && (
+          <p style={styles.error}>
+            No cumulative summary group found in tag_master — check the equipment_group values.
+          </p>
+        )}
+
+        {summary && (
+          <section style={{ marginBottom: 28 }}>
+            <div style={styles.sectionHead}>
+              <span style={styles.sectionLabel}>{summary.group}</span>
+              <span style={styles.sectionMeta}>
+                {summary.tags.length} meters · live value + latest daily total · refreshes every {REFRESH_MS / 1000}s
+              </span>
+            </div>
+            <div style={styles.summaryGrid}>
+              {summary.tags.map(tag => (
+                <SummaryItem key={tag.tag_id} tag={tag} />
+              ))}
+            </div>
+          </section>
+        )}
 
         <div style={styles.grid}>
           {TILES.map(tile => (
@@ -51,40 +120,116 @@ export default function Dashboard() {
   )
 }
 
-function SummaryItem({ label, value, unit, color }) {
+function SummaryItem({ tag }) {
+  const hasValue = tag.value !== null && tag.value !== undefined
+  const hasDay = tag.day_value !== null && tag.day_value !== undefined
+  const updated = timeAgo(tag.last_updated)
+  const dayLabel = hasDay ? fmtDay(tag.day_date) : null
   return (
     <div style={styles.summaryItem}>
-      <span style={styles.summaryLabel}>{label}</span>
-      <span className="num" style={{ ...styles.summaryValue, color }}>
-        {value !== undefined ? value.toLocaleString() : '—'} <small style={{ color: 'var(--text-muted)', fontSize: 12 }}>{unit}</small>
+      <span style={styles.summaryLabel} title={tag.tag_name}>{displayLabel(tag)}</span>
+      <span className="num" style={styles.summaryValue}>
+        {hasValue ? Number(tag.value).toLocaleString('en-IN') : '—'}
+        <small style={styles.summaryUnit}>{tag.unit}</small>
       </span>
+      {updated && (
+        <span style={{ ...styles.summaryTime, ...(isStale(tag.last_updated) ? styles.summaryTimeStale : {}) }}>
+          {updated}
+        </span>
+      )}
+      {hasDay && (
+        <span style={styles.summaryDay}>
+          <span style={styles.summaryDayLabel}>{dayLabel ? `${dayLabel} total` : 'day total'}</span>
+          <span className="num">{Number(tag.day_value).toLocaleString('en-IN')} {tag.unit}</span>
+        </span>
+      )}
     </div>
   )
 }
 
 const styles = {
-  summaryStrip: {
+  sectionHead: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
+  sectionLabel: {
+    fontFamily: 'var(--font-display)',
+    fontSize: 13,
+    fontWeight: 600,
+    color: 'var(--accent-amber)',
+    background: 'var(--accent-amber-dim)',
+    padding: '6px 14px',
+    borderRadius: 999,
+    letterSpacing: '0.02em',
+  },
+  sectionMeta: {
+    fontSize: 12,
+    color: 'var(--text-muted)',
+  },
+  summaryGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: 14,
-    marginBottom: 28,
+    gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
+    gap: 12,
   },
   summaryItem: {
     background: 'var(--bg-panel)',
     border: '1px solid var(--border-soft)',
     borderRadius: 'var(--radius-md)',
-    padding: '14px 18px',
+    padding: '12px 14px',
     display: 'flex',
     flexDirection: 'column',
-    gap: 6,
+    gap: 4,
+    minWidth: 0,
   },
   summaryLabel: {
     fontSize: 12,
     color: 'var(--text-muted)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   summaryValue: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: 600,
+    color: 'var(--text-primary)',
+  },
+  summaryUnit: {
+    color: 'var(--text-muted)',
+    fontSize: 12,
+    marginLeft: 5,
+  },
+  summaryTime: {
+    fontSize: 11,
+    color: 'var(--text-muted)',
+  },
+  summaryTimeStale: {
+    color: 'var(--accent-amber)',
+  },
+  summaryDay: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: 8,
+    fontSize: 11,
+    color: 'var(--text-secondary)',
+    borderTop: '1px solid var(--border-soft)',
+    paddingTop: 5,
+    marginTop: 3,
+  },
+  summaryDayLabel: {
+    color: 'var(--text-muted)',
+    whiteSpace: 'nowrap',
+  },
+  error: {
+    color: 'var(--accent-red)',
+    fontSize: 13,
+  },
+  muted: {
+    color: 'var(--text-muted)',
+    fontSize: 13,
   },
   grid: {
     display: 'grid',

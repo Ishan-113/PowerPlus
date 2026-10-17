@@ -20,6 +20,7 @@ export const api = {
       (tagIds && tagIds.length ? `&tag_ids=${tagIds.join(',')}` : '')
     ),
   getConsumption: (date) => request(`/api/consumption?date=${date}`),
+  getHealth: () => request('/health/db'),
   ask: (question) => fetch(`${BASE_URL}/api/ask`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
