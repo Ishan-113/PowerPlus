@@ -113,6 +113,13 @@ FORBIDDEN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Blocked even though they can appear in a SELECT: file writes on the DB host
+# (INTO OUTFILE/DUMPFILE, LOAD_FILE) and resource-abuse functions.
+FORBIDDEN_EXTRA_PATTERN = re.compile(
+    r"(\bINTO\s+(OUTFILE|DUMPFILE)\b|\b(LOAD_FILE|SLEEP|BENCHMARK|GET_LOCK|RELEASE_LOCK)\b)",
+    re.IGNORECASE,
+)
+
 
 def is_safe_select(sql: str) -> tuple[bool, str]:
     """Returns (is_safe, reason_if_not)."""
@@ -124,7 +131,7 @@ def is_safe_select(sql: str) -> tuple[bool, str]:
     if ";" in cleaned:
         return False, "Multiple statements are not allowed"
 
-    if FORBIDDEN_PATTERN.search(cleaned):
+    if FORBIDDEN_PATTERN.search(cleaned) or FORBIDDEN_EXTRA_PATTERN.search(cleaned):
         return False, "Query contains a disallowed keyword"
 
     return True, ""

@@ -3,7 +3,10 @@ import TopBar from '../components/TopBar.jsx'
 import Sparkline from '../components/Sparkline.jsx'
 import { api } from '../api.js'
 
-function isoNoMs(d) { return d.toISOString().slice(0, 19) }
+function localTs(d) {
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
 
 export default function DataMonitor() {
   const [groups, setGroups] = useState([])
@@ -24,7 +27,7 @@ export default function DataMonitor() {
         if (allIds.length) {
           const end = new Date()
           const start = new Date(end.getTime() - 4 * 60 * 60 * 1000) // last 4 hours
-          const series = await api.getHistory(allIds, isoNoMs(start), isoNoMs(end))
+          const series = await api.getHistory(allIds, localTs(start), localTs(end))
           if (cancelled) return
           const map = {}
           series.forEach(s => { map[s.tag_id] = s.points.map(p => Number(p.value)) })

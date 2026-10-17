@@ -22,7 +22,7 @@ function defaultRange(granularity) {
   if (granularity === '15min') start.setHours(start.getHours() - 6)
   else if (granularity === 'hourly') start.setDate(start.getDate() - 1)
   else if (granularity === 'daily') start.setDate(start.getDate() - 7)
-  else start.setMonth(start.getMonth() - 6)
+  else { start.setMonth(start.getMonth() - 6); start.setDate(1) }
   const withTime = granularity === '15min' || granularity === 'hourly'
   return { start: fmtLocal(start, withTime), end: fmtLocal(end, withTime) }
 }

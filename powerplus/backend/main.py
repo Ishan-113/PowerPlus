@@ -15,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import logging
-import database as db_module
 from database import get_cursor
 import nl_query
 
@@ -174,18 +173,25 @@ def get_report(
         query += f" ORDER BY t.tag_id, t.{ts_col}"
 
     else:  # monthly
-        table, ts_col = "tag_rollup_monthly", "rollup_month"
-        query = f"""
-            SELECT t.tag_id, tm.tag_name, tm.unit, t.{ts_col} AS period, t.value
-            FROM {table} t
+        # derived from tag_rollup_daily so it always reflects the latest
+        # imported data (tag_rollup_monthly is not kept current by imports).
+        # Cumulative tags: month total = sum of the daily day-totals.
+        # Instant tags: month value = average of the daily averages.
+        query = """
+            SELECT t.tag_id, tm.tag_name, tm.unit,
+                   DATE_SUB(t.rollup_date, INTERVAL DAYOFMONTH(t.rollup_date) - 1 DAY) AS period,
+                   CASE WHEN tm.tag_type = 'cumulative'
+                        THEN SUM(t.value)
+                        ELSE AVG(t.avg_value) END AS value
+            FROM tag_rollup_daily t
             JOIN tag_master tm ON tm.tag_id = t.tag_id
-            WHERE t.{ts_col} BETWEEN %s AND %s
+            WHERE t.rollup_date BETWEEN %s AND %s
         """
         params = [start, end]
         if ids:
             query += f" AND t.tag_id IN ({','.join(['%s']*len(ids))})"
             params += ids
-        query += f" ORDER BY t.tag_id, t.{ts_col}"
+        query += " GROUP BY t.tag_id, tm.tag_name, tm.unit, tm.tag_type, period ORDER BY t.tag_id, period"
 
     with get_cursor() as cur:
         cur.execute(query, params)
@@ -243,20 +249,12 @@ def health():
 
 @app.get("/health/db")
 def health_db():
-    """DB connectivity check — returns driver error without leaking credentials."""
+    """DB connectivity check. No connection details are exposed publicly."""
     try:
         with get_cursor() as cur:
             cur.execute("SELECT 1 AS ok")
-            row = cur.fetchone()
-        return {
-            "status": "ok",
-            "db_host": db_module.DB_HOST,
-            "db_port": db_module.DB_PORT,
-            "db_name": db_module.DB_NAME,
-            "db_user": db_module.DB_USER,
-            "db_ssl": db_module.DB_SSL,
-            "result": row,
-        }
-    except Exception as e:
+            cur.fetchone()
+        return {"status": "ok"}
+    except Exception:
         logger.exception("DB health check failed")
-        raise HTTPException(500, f"DB connection failed: {type(e).__name__}: {e}")
+        raise HTTPException(500, "database unavailable")

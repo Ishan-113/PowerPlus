@@ -178,6 +178,23 @@ def main():
         )
         print("rebuilt daily rollups from history")
 
+        cur.execute(
+            f"DELETE FROM tag_rollup_monthly WHERE tag_id IN ({placeholders}) AND rollup_month = '2026-10-01'",
+            list(TAG_IDS),
+        )
+        cur.execute(
+            f"""INSERT INTO tag_rollup_monthly (tag_id, rollup_month, value, min_value, max_value, avg_value)
+                SELECT d.tag_id, DATE_SUB(d.rollup_date, INTERVAL DAYOFMONTH(d.rollup_date) - 1 DAY),
+                       CASE WHEN tm.tag_type = 'cumulative' THEN SUM(d.value) ELSE AVG(d.avg_value) END,
+                       MIN(d.min_value), MAX(d.max_value), AVG(d.avg_value)
+                FROM tag_rollup_daily d
+                JOIN tag_master tm ON tm.tag_id = d.tag_id
+                WHERE d.tag_id IN ({placeholders}) AND d.rollup_date IN ('2026-10-14','2026-10-15')
+                GROUP BY d.tag_id, tm.tag_type, DATE_SUB(d.rollup_date, INTERVAL DAYOFMONTH(d.rollup_date) - 1 DAY)""",
+            list(TAG_IDS),
+        )
+        print("rebuilt monthly rollup for 2026-10 from daily rollups")
+
         # Dashboard card value = previous live value + everything this import
         # adds (the same per-tag sums the PDF's own Total row shows). Guard
         # against double-counting: only accumulate if the PDF rows weren't
