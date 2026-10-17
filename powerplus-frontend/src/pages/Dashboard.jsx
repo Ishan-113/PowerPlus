@@ -8,17 +8,7 @@ const TILES = [
   { to: '/trends', label: 'Trends', desc: 'Plot tags over time', accent: 'var(--accent-amber)' },
   { to: '/report', label: 'Report', desc: '15-min, daily & monthly exports', accent: 'var(--accent-blue)' },
   { to: '/consumption', label: 'Consumption', desc: 'Daily energy ledger', accent: 'var(--accent-red)' },
-  { to: '/ask', label: 'Ask', desc: 'Plain-English questions', accent: 'var(--accent-cyan)' },
 ]
-
-const KEY_METERS = [
-  { tag_name: 'Grid Import kWh', label: 'Grid Import', color: 'var(--accent-red)' },
-  { tag_name: 'Grid Export kWh', label: 'Grid Export', color: 'var(--accent-cyan)' },
-  { tag_name: '30MW TG-2 kWh', label: 'TG-2 Generation', color: 'var(--accent-amber)' },
-  { tag_name: '33MW TG-3 kWh', label: 'TG-3 Generation', color: 'var(--accent-amber)' },
-]
-
-const REFRESH_MS = 30000
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -26,23 +16,10 @@ export default function Dashboard() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      try {
-        const groups = await api.getLive()
-        if (!cancelled) {
-          setSummary(groups.find(g => g.group === 'Cumulative (24 Hours)') || null)
-          setError(null)
-        }
-      } catch (e) {
-        if (!cancelled) setError(e.message)
-      }
-    }
-
-    load()
-    const id = setInterval(load, REFRESH_MS)
-    return () => { cancelled = true; clearInterval(id) }
+    api.getLive().then(groups => {
+      const cumulative = groups.find(g => g.group === 'Cumulative (24 Hours)')
+      setSummary(cumulative)
+    }).catch(e => setError(e.message))
   }, [])
 
   const find = (name) => summary?.tags.find(t => t.tag_name === name)?.value
@@ -53,11 +30,12 @@ export default function Dashboard() {
       <div style={{ padding: 28 }}>
 
         <div style={styles.summaryStrip}>
-          {KEY_METERS.map(m => (
-            <KeyMeterCard key={m.tag_name} label={m.label} value={find(m.tag_name)} unit="kWh" color={m.color} />
-          ))}
+          <SummaryItem label="Grid Import" value={find('Grid Import kWh')} unit="kWh" color="var(--accent-red)" />
+          <SummaryItem label="Grid Export" value={find('Grid Export kWh')} unit="kWh" color="var(--accent-cyan)" />
+          <SummaryItem label="TG-2 Generation" value={find('30MW TG-2 kWh')} unit="kWh" color="var(--accent-amber)" />
+          <SummaryItem label="TG-3 Generation" value={find('33MW TG-3 kWh')} unit="kWh" color="var(--accent-amber)" />
         </div>
-        {error && <p style={styles.error}>Could not reach API: {error}</p>}
+        {error && <p style={{ color: 'var(--accent-red)', fontSize: 13 }}>Could not reach API: {error}</p>}
 
         <div style={styles.grid}>
           {TILES.map(tile => (
@@ -73,14 +51,12 @@ export default function Dashboard() {
   )
 }
 
-function KeyMeterCard({ label, value, unit, color }) {
-  const hasValue = value !== null && value !== undefined
+function SummaryItem({ label, value, unit, color }) {
   return (
     <div style={styles.summaryItem}>
       <span style={styles.summaryLabel}>{label}</span>
       <span className="num" style={{ ...styles.summaryValue, color }}>
-        {hasValue ? Number(value).toLocaleString('en-IN') : '—'}
-        <small style={styles.summaryUnit}>{unit}</small>
+        {value !== undefined ? value.toLocaleString() : '—'} <small style={{ color: 'var(--text-muted)', fontSize: 12 }}>{unit}</small>
       </span>
     </div>
   )
@@ -89,7 +65,7 @@ function KeyMeterCard({ label, value, unit, color }) {
 const styles = {
   summaryStrip: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
     gap: 14,
     marginBottom: 28,
   },
@@ -97,7 +73,7 @@ const styles = {
     background: 'var(--bg-panel)',
     border: '1px solid var(--border-soft)',
     borderRadius: 'var(--radius-md)',
-    padding: '16px 18px',
+    padding: '14px 18px',
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
@@ -107,18 +83,8 @@ const styles = {
     color: 'var(--text-muted)',
   },
   summaryValue: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 600,
-  },
-  summaryUnit: {
-    color: 'var(--text-muted)',
-    fontSize: 12,
-    marginLeft: 5,
-  },
-  error: {
-    color: 'var(--accent-red)',
-    fontSize: 13,
-    marginBottom: 18,
   },
   grid: {
     display: 'grid',
