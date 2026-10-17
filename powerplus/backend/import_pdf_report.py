@@ -50,7 +50,7 @@ def extract_rows(pdf_path):
                         continue  # metadata rows before the header
                     if row and row[0] == "Total":
                         continue  # skip summary row
-                    if row and row[0]:
+                    if row and row[0] and len(row) > 1:
                         yield header, row
 
 

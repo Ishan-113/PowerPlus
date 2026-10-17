@@ -41,9 +41,17 @@ app.add_middleware(
 def get_live_values(group: Optional[str] = None):
     query = """
         SELECT tm.tag_id, tm.tag_name, tm.equipment_group, tm.unit,
-               lv.value, lv.last_updated
+               lv.value, lv.last_updated,
+               rd.value AS day_value, rd.rollup_date AS day_date
         FROM tag_master tm
         LEFT JOIN live_values lv ON lv.tag_id = tm.tag_id
+        LEFT JOIN (
+            SELECT trd.tag_id, trd.value, trd.rollup_date
+            FROM tag_rollup_daily trd
+            JOIN (SELECT tag_id, MAX(rollup_date) AS max_day
+                  FROM tag_rollup_daily GROUP BY tag_id) m
+              ON m.tag_id = trd.tag_id AND m.max_day = trd.rollup_date
+        ) rd ON rd.tag_id = tm.tag_id
         WHERE tm.is_active = TRUE
     """
     params = []
@@ -112,7 +120,14 @@ def get_report(
     end: str = Query(..., description="Date or datetime depending on granularity"),
     tag_ids: Optional[str] = Query(None, description="Comma-separated tag_id list; omit for all"),
 ):
-    ids = [int(x) for x in tag_ids.split(",")] if tag_ids else None
+    ids = None
+    if tag_ids:
+        try:
+            ids = [int(x) for x in tag_ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(400, "tag_ids must be a comma-separated list of integers")
+        if not ids:
+            ids = None
 
     if granularity == "15min":
         # raw 15-min history
@@ -216,7 +231,8 @@ def ask_question(req: AskRequest):
         raise HTTPException(400, "question must not be empty")
     try:
         return nl_query.ask(req.question.strip())
-    except RuntimeError as e:
+    except Exception as e:
+        logger.exception("Ask failed")
         raise HTTPException(500, str(e))
 
 

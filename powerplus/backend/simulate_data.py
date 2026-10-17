@@ -22,7 +22,7 @@ def get_all_tags(cur):
 
 
 def random_value(tag):
-    # kW-type instant tags: 0-8000, cumulative meters: monotonically increasing
+    # placeholder ranges per unit/tag type; replaced by a real PLC/SCADA feed later
     if tag["tag_type"] == "cumulative":
         return round(random.uniform(0, 5000), 3)
     if tag["unit"] == "%":

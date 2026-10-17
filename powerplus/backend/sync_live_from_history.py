@@ -24,11 +24,13 @@ with get_cursor() as cur:
     cur.execute(
         """INSERT INTO tag_rollup_daily
              (tag_id, rollup_date, value, min_value, max_value, avg_value, source)
-           SELECT tag_id, DATE(ts), SUM(value), MIN(value), MAX(value),
-                  AVG(value), 'real'
-           FROM tag_history
-           WHERE DATE(ts) NOT IN (SELECT DISTINCT rollup_date FROM tag_rollup_daily)
-           GROUP BY tag_id, DATE(ts)"""
+           SELECT h.tag_id, DATE(h.ts), SUM(h.value), MIN(h.value), MAX(h.value),
+                  AVG(h.value), 'real'
+           FROM tag_history h
+           LEFT JOIN tag_rollup_daily d
+             ON d.tag_id = h.tag_id AND d.rollup_date = DATE(h.ts)
+           WHERE d.tag_id IS NULL
+           GROUP BY h.tag_id, DATE(h.ts)"""
     )
     print("daily rollups filled:", cur.rowcount)
 
