@@ -11,6 +11,13 @@ const TILES = [
   { to: '/ask', label: 'Ask', desc: 'Plain-English questions', accent: 'var(--accent-cyan)' },
 ]
 
+const HIGHLIGHT_TAGS = [
+  { tag_name: 'Grid Import kWh', label: 'Grid Import' },
+  { tag_name: 'Grid Export kWh', label: 'Grid Export' },
+  { tag_name: '30MW TG-2 kWh', label: 'TG-2 Generation' },
+  { tag_name: '33MW TG-3 kWh', label: 'TG-3 Generation' },
+]
+
 const REFRESH_MS = 30000
 const STALE_MS = 24 * 60 * 60 * 1000
 
@@ -48,9 +55,18 @@ function fmtDay(d) {
   return parsed ? parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : null
 }
 
+function fmtDayFull(d) {
+  const parsed = parseTs(d)
+  return parsed
+    ? parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    : String(d ?? '')
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const [groups, setGroups] = useState(null)
+  const [highlights, setHighlights] = useState([])
+  const [dailyByTag, setDailyByTag] = useState({})
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -59,7 +75,34 @@ export default function Dashboard() {
     async function load() {
       try {
         const data = await api.getLive()
-        if (!cancelled) { setGroups(data); setError(null) }
+        const allTags = data.flatMap(g => g.tags)
+        const highlightTags = HIGHLIGHT_TAGS
+          .map(h => {
+            const t = allTags.find(x => x.tag_name === h.tag_name)
+            return t ? { ...t, label: h.label } : null
+          })
+          .filter(Boolean)
+
+        let daily = {}
+        const ids = highlightTags.map(t => t.tag_id)
+        if (ids.length) {
+          try {
+            const rows = await api.getReport('daily', '2000-01-01', '2099-12-31', ids)
+            for (const r of rows) (daily[r.tag_id] ||= []).push(r)
+            for (const key of Object.keys(daily)) {
+              daily[key].sort((a, b) => String(b.period).localeCompare(String(a.period)))
+            }
+          } catch {
+            daily = {}
+          }
+        }
+
+        if (!cancelled) {
+          setGroups(data)
+          setHighlights(highlightTags)
+          setDailyByTag(daily)
+          setError(null)
+        }
       } catch (e) {
         if (!cancelled) setError(e.message)
       }
@@ -88,6 +131,22 @@ export default function Dashboard() {
           <p style={styles.error}>
             No cumulative summary group found in tag_master — check the equipment_group values.
           </p>
+        )}
+
+        {highlights.length > 0 && (
+          <section style={{ marginBottom: 28 }}>
+            <div style={styles.sectionHead}>
+              <span style={styles.sectionLabel}>Key meters</span>
+              <span style={styles.sectionMeta}>
+                live value + every daily total stored in the database
+              </span>
+            </div>
+            <div style={styles.highlightGrid}>
+              {highlights.map(tag => (
+                <HighlightCard key={tag.tag_id} tag={tag} daily={dailyByTag[tag.tag_id] || []} />
+              ))}
+            </div>
+          </section>
         )}
 
         {summary && (
@@ -147,6 +206,41 @@ function SummaryItem({ tag }) {
   )
 }
 
+function HighlightCard({ tag, daily }) {
+  const hasValue = tag.value !== null && tag.value !== undefined
+  const updated = timeAgo(tag.last_updated)
+  return (
+    <div style={styles.highlightCard}>
+      <span style={styles.highlightLabel}>{tag.label}</span>
+      <span className="num" style={styles.highlightValue}>
+        {hasValue ? Number(tag.value).toLocaleString('en-IN') : '—'}
+        <small style={styles.summaryUnit}>{tag.unit}</small>
+      </span>
+      {updated && (
+        <span style={{ ...styles.summaryTime, ...(isStale(tag.last_updated) ? styles.summaryTimeStale : {}) }}>
+          {updated}
+        </span>
+      )}
+      <div style={styles.dailyList}>
+        {daily.length ? daily.map(r => (
+          <div key={r.period} style={styles.dailyRow}>
+            <span style={styles.dailyDate}>{fmtDayFull(r.period)}</span>
+            <span
+              className="num"
+              style={{ ...styles.dailyValue, ...(r.source === 'simulated' ? styles.dailyValueSim : {}) }}
+            >
+              {Number(r.value).toLocaleString('en-IN')}
+              {r.source === 'simulated' && <small> sim</small>}
+            </span>
+          </div>
+        )) : (
+          <span style={styles.dailyEmpty}>No stored daily totals</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const styles = {
   sectionHead: {
     display: 'flex',
@@ -174,6 +268,61 @@ const styles = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
     gap: 12,
+  },
+  highlightGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+    gap: 12,
+  },
+  highlightCard: {
+    background: 'var(--bg-panel)',
+    border: '1px solid var(--border-soft)',
+    borderRadius: 'var(--radius-md)',
+    padding: '14px 16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    minWidth: 0,
+  },
+  highlightLabel: {
+    fontSize: 12,
+    color: 'var(--text-muted)',
+  },
+  highlightValue: {
+    fontSize: 24,
+    fontWeight: 600,
+    color: 'var(--text-primary)',
+  },
+  dailyList: {
+    marginTop: 8,
+    borderTop: '1px solid var(--border-soft)',
+    paddingTop: 8,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 3,
+    maxHeight: 168,
+    overflowY: 'auto',
+  },
+  dailyRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: 8,
+    fontSize: 11,
+  },
+  dailyDate: {
+    color: 'var(--text-muted)',
+    whiteSpace: 'nowrap',
+  },
+  dailyValue: {
+    color: 'var(--text-secondary)',
+  },
+  dailyValueSim: {
+    color: 'var(--text-muted)',
+    fontStyle: 'italic',
+  },
+  dailyEmpty: {
+    fontSize: 11,
+    color: 'var(--text-muted)',
   },
   summaryItem: {
     background: 'var(--bg-panel)',

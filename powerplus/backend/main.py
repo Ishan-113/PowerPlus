@@ -162,7 +162,7 @@ def get_report(
     elif granularity == "daily":
         table, ts_col = "tag_rollup_daily", "rollup_date"
         query = f"""
-            SELECT t.tag_id, tm.tag_name, tm.unit, t.{ts_col} AS period, t.value
+            SELECT t.tag_id, tm.tag_name, tm.unit, t.{ts_col} AS period, t.value, t.source
             FROM {table} t
             JOIN tag_master tm ON tm.tag_id = t.tag_id
             WHERE t.{ts_col} BETWEEN %s AND %s
