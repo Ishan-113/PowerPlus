@@ -1,0 +1,31 @@
+# PowerPlus Windows installer configuration (electron-builder)
+appId: app.powerplus.monitor
+productName: PowerPlus
+directories:
+  output: dist_electron
+  buildResources: build
+
+# Wrapper app: the dashboard is loaded live from Vercel, so only the
+# launcher script is packed — no node_modules, no dist needed.
+compression: normal  # LZMA (small installer); pagefile can grow now that C: has room
+electronLanguages:   # strip 50+ unused Electron locale files -> smaller payload
+  - en-US
+
+files:
+  - electron/main.js
+  - package.json
+  - "!node_modules/**"
+  - "!dist/**"
+  - "!dist_electron/**"
+  - "!src/**"
+  - "!public/**"
+
+win:
+  target: nsis
+  icon: build/icon.ico   # pre-built: skips the WASM icon converter (memory-hungry)
+
+nsis:
+  oneClick: true          # double-click -> installed -> launches; no wizard
+  perMachine: false       # installs per-user; no admin rights needed
+  artifactName: PowerPlus-Setup-${version}.exe
+  deleteAppDataOnUninstall: false

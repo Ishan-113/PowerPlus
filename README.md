@@ -23,16 +23,21 @@ A React + Vite dashboard (deployed on Vercel) talking to a FastAPI + MySQL backe
    - If it says **"App not installed"** → an older PowerPlus app is present: uninstall it first (Settings → Apps → PowerPlus), then retry.
 5. Open PowerPlus — it loads the live dashboard. Updates arrive automatically with every site deploy.
 
-### 🖥️ Windows (portable app, ~139 MB)
+### 🖥️ Windows
+
+**Option A — Installer (recommended, ~107 MB):**
+
+1. Download **PowerPlus-Setup-1.0.0.exe** from the [Releases page](https://github.com/Ishan-113/PowerPlus/releases/latest).
+2. Double-click it. If SmartScreen shows *"Windows protected your PC"* → click **More info → Run anyway** (one time only — the app isn't code-signed; it's our own build).
+3. It installs for your user (no admin rights needed) and launches automatically. Find **PowerPlus** in the Start menu; uninstall any time via Settings → Apps.
+
+**Option B — Portable, no install (~139 MB):**
 
 1. Download **PowerPlus-Windows.zip** from the [Releases page](https://github.com/Ishan-113/PowerPlus/releases/latest).
-2. Right-click the zip → **Extract All** (default location is fine).
-3. Open the extracted **PowerPlus** folder and double-click **PowerPlus.exe**.
-4. If Windows SmartScreen shows *"Windows protected your PC"* → click **More info → Run anyway** (one time only — the app isn't code-signed, it's our own build).
-5. The dashboard opens in its own window with the PowerPlus icon. Recommended:
-   - Right-click `PowerPlus.exe` → **Pin to taskbar** and/or **Send to → Desktop (create shortcut)**.
-6. Deleting the folder removes it completely — no registry/installed-program leftovers.
-7. Updates arrive automatically — the app always loads the live site.
+2. Right-click → **Extract All** — keep the folder somewhere plain like `D:\Apps` (avoid OneDrive-synced folders such as the Desktop).
+3. Double-click **PowerPlus.exe** (same SmartScreen note as above). Delete the folder to remove it completely.
+
+Both versions load the live site, so **updates arrive automatically** with every deploy — no reinstalls needed.
 
 ### 💡 Alternative: install as a PWA (any device, no download)
 
