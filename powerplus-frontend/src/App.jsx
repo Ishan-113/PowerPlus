@@ -6,7 +6,6 @@ import Trends from './pages/Trends.jsx'
 import Report from './pages/Report.jsx'
 import Consumption from './pages/Consumption.jsx'
 import Ask from './pages/Ask.jsx'
-import Download from './pages/Download.jsx'
 
 export default function App() {
   return (
@@ -20,7 +19,6 @@ export default function App() {
           <Route path="/report" element={<Report />} />
           <Route path="/consumption" element={<Consumption />} />
           <Route path="/ask" element={<Ask />} />
-          <Route path="/download" element={<Download />} />
         </Routes>
       </main>
     </div>
