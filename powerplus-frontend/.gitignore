@@ -1,2 +1,5 @@
 node_modules/
 dist/
+# Never commit signing credentials to the repo
+powerplus-release.keystore
+keystore-info.txt
