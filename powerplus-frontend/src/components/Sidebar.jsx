@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/report', label: 'Report', icon: ReportIcon },
   { to: '/consumption', label: 'Consumption', icon: ConsumptionIcon },
   { to: '/ask', label: 'Ask', icon: AskIcon },
+  { to: '/download', label: 'Get App', icon: DownloadIcon },
 ]
 
 export default function Sidebar() {
@@ -79,6 +80,10 @@ function ConsumptionIcon() {
 }
 function AskIcon() {
   return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="12" cy="17" r="0.9" fill="currentColor"/></svg>)
+}
+
+function DownloadIcon() {
+  return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 4v10m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M5 18h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>)
 }
 
 const styles = {
