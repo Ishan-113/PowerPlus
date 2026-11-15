@@ -11,6 +11,8 @@ Uses Google's Gemini API (free tier — Flash models). Set GEMINI_API_KEY in .en
 """
 import os
 import re
+import time
+import hashlib
 
 from google import genai
 from google.genai import errors as genai_errors
@@ -21,11 +23,22 @@ from database import get_cursor
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# gemini-3.7/3.8-flash currently hang server-side (504 DEADLINE_EXCEEDED);
-# gemini-2.5-flash is retired for new users. 3.6-flash is stable and fast.
-MODEL_NAME = "gemini-3.6-flash"
+
+# Free tier allows only 20 requests/DAY per model (per project), so calls are
+# spread across several models — each model has its OWN daily bucket.
+# Notes: 3.7/3.8-flash currently hang server-side (504); 2.5* models are
+# retired for new users (404). 3.5-flash is intermittently flaky (504), so the
+# reliable 3.1-flash-lite sits before it. All three verified to produce valid
+# SQL for this schema with thinking disabled.
+MODEL_FALLBACKS = ["gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash"]
 
 _client = None
+
+# Repeated questions (the example chips!) are answered from this cache and
+# cost zero quota. 60-minute TTL, capped size.
+_CACHE: dict[str, tuple[float, str]] = {}
+_CACHE_TTL_SECONDS = 3600
+_CACHE_MAX_ENTRIES = 100
 
 
 def get_client():
@@ -33,9 +46,9 @@ def get_client():
     if _client is None:
         if not GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY is not set in .env")
-        # Hard 30s per-request cap so a slow/overloaded model surfaces as an
-        # error instead of hanging the /api/ask request forever.
-        _client = genai.Client(api_key=GEMINI_API_KEY, http_options={"timeout": 30000})
+        # Hard 20s per-request cap so a slow/overloaded model surfaces quickly
+        # and the fallback chain can move on to the next model.
+        _client = genai.Client(api_key=GEMINI_API_KEY, http_options={"timeout": 20000})
     return _client
 
 
@@ -45,31 +58,67 @@ _NO_THINKING = genai.types.GenerateContentConfig(
     thinking_config=genai.types.ThinkingConfig(thinking_budget=0)
 )
 
+# If a model's per-MINUTE limit trips or it hangs server-side, the window
+# rolls over quickly — one short pause + retry recovers both. A model that
+# returns 429 goes on cooldown so later requests skip straight to models that
+# still have budget instead of re-probing it on every question.
+_RETRY_PAUSE = 12
+_MODEL_COOLDOWN: dict[str, float] = {}
+_COOLDOWN_SECONDS = 1800
+
+
+def _translate_error(e: genai_errors.APIError) -> RuntimeError:
+    if e.code == 429:
+        return RuntimeError(
+            "Gemini free-tier daily quota is used up for all available models "
+            "(20 requests/day each). Quotas reset around midnight Pacific Time "
+            "(early morning IST) — try again then."
+        )
+    if e.code in (503, 504):
+        return RuntimeError(
+            "The Gemini service is busy or overloaded right now. Please try again in a minute."
+        )
+    if e.code == 403:
+        return RuntimeError(
+            "Gemini rejected the API key (403). Check that GEMINI_API_KEY is valid and active."
+        )
+    return RuntimeError(f"Gemini API error {e.code} {e.status}: {e.message}")
+
 
 def _generate(contents: str) -> str:
-    """Single entry point for all Gemini calls — turns API errors into messages
-    a plant operator can actually read."""
-    try:
-        response = get_client().models.generate_content(
-            model=MODEL_NAME, contents=contents, config=_NO_THINKING
-        )
-        return response.text
-    except genai_errors.APIError as e:
-        if e.code == 429:
-            raise RuntimeError(
-                "Gemini free-tier quota is exhausted right now. "
-                "Daily limits reset around midnight Pacific Time — try again later, "
-                "or enable billing on the API key for higher limits."
-            )
-        if e.code == 503 or e.code == 504:
-            raise RuntimeError(
-                "The Gemini model is busy or overloaded at the moment. Please try again in a minute."
-            )
-        if e.code == 403:
-            raise RuntimeError(
-                "Gemini rejected the API key (403). Check that GEMINI_API_KEY in the environment is valid and active."
-            )
-        raise
+    """Single entry point for all Gemini calls: caches repeat prompts, spreads
+    the daily quota across models, retries transient blips (per-minute 429s
+    and server-side 504 hangs both recover within seconds), and turns API
+    errors into messages a plant operator can actually read."""
+    cache_key = hashlib.sha1(contents.encode()).hexdigest()
+    cached = _CACHE.get(cache_key)
+    if cached and time.time() - cached[0] < _CACHE_TTL_SECONDS:
+        return cached[1]
+
+    last_error: genai_errors.APIError | None = None
+    for model in MODEL_FALLBACKS:
+        if time.time() - _MODEL_COOLDOWN.get(model, 0.0) < _COOLDOWN_SECONDS:
+            continue  # recently quota-blocked — go straight to the next model
+        for attempt in (1, 2):
+            try:
+                response = get_client().models.generate_content(
+                    model=model, contents=contents, config=_NO_THINKING
+                )
+                text = response.text
+                if len(_CACHE) >= _CACHE_MAX_ENTRIES:
+                    _CACHE.pop(next(iter(_CACHE)))
+                _CACHE[cache_key] = (time.time(), text)
+                return text
+            except genai_errors.APIError as e:
+                last_error = e
+                if e.code in (400, 401, 403):
+                    raise _translate_error(e)
+                if e.code == 429:
+                    _MODEL_COOLDOWN[model] = time.time()
+                if attempt == 1:
+                    time.sleep(_RETRY_PAUSE)
+
+    raise _translate_error(last_error)
 
 
 SCHEMA_TABLES = """
@@ -221,5 +270,13 @@ def ask(question: str) -> dict:
         except Exception as e:
             return {"question": question, "sql": sql, "error": f"SQL execution failed: {e}", "rows": [], "answer": None}
 
-        answer = summarize_results(question, sql, rows)
-        return {"question": question, "sql": sql, "error": None, "rows": rows, "answer": answer}
+        try:
+            answer = summarize_results(question, sql, rows)
+            note = None
+        except RuntimeError as e:
+            # Data is already in hand — don't throw it away because the
+            # plain-English summary call hit a quota/availability blip.
+            answer, note = None, str(e)
+
+        return {"question": question, "sql": sql, "error": None, "rows": rows,
+                "answer": answer, "note": note}

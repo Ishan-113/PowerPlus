@@ -66,7 +66,13 @@ export default function Ask() {
               <p style={{ color: 'var(--accent-red)' }}>{result.error}</p>
             ) : (
               <>
-                <p style={styles.answerText}>{result.answer}</p>
+                {result.answer && <p style={styles.answerText}>{result.answer}</p>}
+                {result.note && (
+                  <p style={{ color: 'var(--accent-amber)', fontSize: 13, margin: '8px 0 0' }}>
+                    {result.note}
+                  </p>
+                )}
+                <p style={styles.dataNote}>Live result — {result.rows?.length ?? 0} row(s)</p>
 
                 <button style={styles.sqlToggle} onClick={() => setShowSql(s => !s)}>
                   {showSql ? 'Hide SQL' : 'Show SQL used'}
@@ -133,6 +139,7 @@ const styles = {
     borderRadius: 'var(--radius-lg)', padding: 22,
   },
   answerText: { fontSize: 16, lineHeight: 1.6, color: 'var(--text-primary)', margin: 0 },
+  dataNote: { fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '10px 0 0' },
   sqlToggle: {
     marginTop: 14, background: 'transparent', border: 'none', color: 'var(--accent-amber)',
     fontSize: 12.5, padding: 0, cursor: 'pointer',
