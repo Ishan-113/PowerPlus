@@ -20,7 +20,9 @@ from database import get_cursor
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = "gemini-3.8-flash"
+# gemini-3.7/3.8-flash currently hang server-side (504 DEADLINE_EXCEEDED);
+# gemini-2.5-flash is retired for new users. 3.6-flash is stable and fast.
+MODEL_NAME = "gemini-3.6-flash"
 
 _client = None
 
@@ -30,8 +32,17 @@ def get_client():
     if _client is None:
         if not GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY is not set in .env")
-        _client = genai.Client(api_key=GEMINI_API_KEY)
+        # Hard 30s per-request cap so a slow/overloaded model surfaces as an
+        # error instead of hanging the /api/ask request forever.
+        _client = genai.Client(api_key=GEMINI_API_KEY, http_options={"timeout": 30000})
     return _client
+
+
+# Thinking mode on newer flash models adds tens of seconds per call; the SQL
+# task is structured and doesn't need it. 0 disables it.
+_NO_THINKING = genai.types.GenerateContentConfig(
+    thinking_config=genai.types.ThinkingConfig(thinking_budget=0)
+)
 
 
 SCHEMA_TABLES = """
@@ -155,6 +166,7 @@ def generate_sql(question: str, schema_context: str) -> str:
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=f"{prompt}\n\nQUESTION: {question}\n\nSQL:",
+        config=_NO_THINKING,
     )
     sql = response.text.strip()
     sql = re.sub(r"^```(?:sql)?\s*|\s*```$", "", sql, flags=re.IGNORECASE | re.MULTILINE).strip()
@@ -167,7 +179,7 @@ def summarize_results(question: str, sql: str, rows: list) -> str:
         f"{SUMMARY_SYSTEM_PROMPT}\n\n"
         f"QUESTION: {question}\n\nSQL RUN: {sql}\n\nRESULTS ({len(rows)} rows): {rows[:50]}\n\nANSWER:"
     )
-    response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+    response = client.models.generate_content(model=MODEL_NAME, contents=prompt, config=_NO_THINKING)
     return response.text.strip()
 
 

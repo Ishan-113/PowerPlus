@@ -21,12 +21,24 @@ export const api = {
     ),
   getConsumption: (date) => request(`/api/consumption?date=${date}`),
   getHealth: () => request('/health/db'),
-  ask: (question) => fetch(`${BASE_URL}/api/ask`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question }),
-  }).then(async res => {
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  }),
+  ask: (question) => {
+    // Abort after 90s so the spinner can never hang forever (Render's proxy
+    // kills the request around 100s anyway).
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 90000)
+    return fetch(`${BASE_URL}/api/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+      signal: controller.signal,
+    }).then(async res => {
+      clearTimeout(timer)
+      if (!res.ok) throw new Error(await res.text())
+      return res.json()
+    }).catch(e => {
+      clearTimeout(timer)
+      if (e.name === 'AbortError') throw new Error('Request timed out — the model took too long to answer. Please try again.')
+      throw e
+    })
+  },
 };
