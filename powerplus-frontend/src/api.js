@@ -33,7 +33,12 @@ export const api = {
       signal: controller.signal,
     }).then(async res => {
       clearTimeout(timer)
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        let msg = body
+        try { msg = JSON.parse(body).detail ?? body } catch { /* keep raw text */ }
+        throw new Error(msg)
+      }
       return res.json()
     }).catch(e => {
       clearTimeout(timer)

@@ -13,6 +13,7 @@ import os
 import re
 
 from google import genai
+from google.genai import errors as genai_errors
 from dotenv import load_dotenv
 
 from database import get_cursor
@@ -43,6 +44,32 @@ def get_client():
 _NO_THINKING = genai.types.GenerateContentConfig(
     thinking_config=genai.types.ThinkingConfig(thinking_budget=0)
 )
+
+
+def _generate(contents: str) -> str:
+    """Single entry point for all Gemini calls — turns API errors into messages
+    a plant operator can actually read."""
+    try:
+        response = get_client().models.generate_content(
+            model=MODEL_NAME, contents=contents, config=_NO_THINKING
+        )
+        return response.text
+    except genai_errors.APIError as e:
+        if e.code == 429:
+            raise RuntimeError(
+                "Gemini free-tier quota is exhausted right now. "
+                "Daily limits reset around midnight Pacific Time — try again later, "
+                "or enable billing on the API key for higher limits."
+            )
+        if e.code == 503 or e.code == 504:
+            raise RuntimeError(
+                "The Gemini model is busy or overloaded at the moment. Please try again in a minute."
+            )
+        if e.code == 403:
+            raise RuntimeError(
+                "Gemini rejected the API key (403). Check that GEMINI_API_KEY in the environment is valid and active."
+            )
+        raise
 
 
 SCHEMA_TABLES = """
@@ -157,30 +184,22 @@ def enforce_limit(sql: str, max_rows: int = 500) -> str:
 def generate_sql(question: str, schema_context: str) -> str:
     from datetime import date
     today = date.today()
-    client = get_client()
     prompt = SQL_SYSTEM_PROMPT.format(
         schema=schema_context,
         today=today.strftime("%Y-%m-%d"),
         year=today.year,
     )
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=f"{prompt}\n\nQUESTION: {question}\n\nSQL:",
-        config=_NO_THINKING,
-    )
-    sql = response.text.strip()
+    sql = _generate(f"{prompt}\n\nQUESTION: {question}\n\nSQL:")
     sql = re.sub(r"^```(?:sql)?\s*|\s*```$", "", sql, flags=re.IGNORECASE | re.MULTILINE).strip()
     return sql
 
 
 def summarize_results(question: str, sql: str, rows: list) -> str:
-    client = get_client()
     prompt = (
         f"{SUMMARY_SYSTEM_PROMPT}\n\n"
         f"QUESTION: {question}\n\nSQL RUN: {sql}\n\nRESULTS ({len(rows)} rows): {rows[:50]}\n\nANSWER:"
     )
-    response = client.models.generate_content(model=MODEL_NAME, contents=prompt, config=_NO_THINKING)
-    return response.text.strip()
+    return _generate(prompt).strip()
 
 
 def ask(question: str) -> dict:
